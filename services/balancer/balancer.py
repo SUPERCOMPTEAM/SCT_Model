@@ -1,7 +1,12 @@
 import asyncio
+
+import numpy as np
 from aiohttp import ClientSession
 import logging
 import random
+
+from services.resizer import translate_neuro_weights
+from train.train import test_model
 
 
 class Peer:
@@ -22,9 +27,10 @@ class ShmBlock:
 
 
 class Balancer:
-    def __init__(self, model, gap_in_requests, postfix="load/random"):
-        self.model = model
+    def __init__(self, gap_in_requests, policy, metric_size=100, postfix="load/random"):
         self.session = None
+        self.policy = policy
+        self.metric_size = metric_size
         self.logger = logging.getLogger(__name__)
         self.peers = [
             Peer(f"http://mock_server1:8001/{postfix}", 0, 0, 0.0),
@@ -47,6 +53,32 @@ class Balancer:
         await self.session.close()
         self.logger.info("Session closed")
 
+    def get_best_peer(self) -> int:
+        neuro_weights = [peer.neuro_weight for peer in self.peers]
+        cumulative_neuro_weights = [sum(neuro_weights[:i + 1]) for i in range(len(neuro_weights))]
+
+        rand_value = random.uniform(0, sum(neuro_weights))
+        for i, weight in enumerate(cumulative_neuro_weights):
+            if rand_value <= weight:
+                return i
+
+    def get_metrics(self):
+        r = []
+        a = []
+        for peer in self.peers:
+            r.append(peer.cnt_requests)
+            a.append(peer.cnt_responses)
+
+        nr = translate_neuro_weights(r, self.metric_size)
+        na = translate_neuro_weights(a, self.metric_size)
+
+        metrics = []
+        for i in range(self.metric_size):
+            metrics.append(nr[i])
+            metrics.append(na[i])
+
+        return metrics
+
     async def get_peer(self) -> Peer:
         async with self.lock:
             for peer in self.peers:
@@ -58,18 +90,22 @@ class Balancer:
                 self.nreq_since_last_weight_update = 0
             else:
                 self.nreq_since_last_weight_update += 1
-
             if self.nreq_since_last_weight_update == 0:
+                self.logger.info("Regenerate peers weights...")
 
+                neuro_weights = translate_neuro_weights(
+                    self.policy.select_action(np.array(self.get_metrics())),
+                    len(self.peers)
+                )
+                for i, peer in enumerate(self.peers):
+                    peer.neuro_weight = neuro_weights[i]
 
+                self.logger.info(f"peers weights: {[peer.neuro_weight for peer in self.peers]}")
 
-                for peer in self.peers:
-                    peer.neuro_weight = random.random()
-
-            best = max(self.peers, key=lambda p: p.neuro_weight)
+            best = self.peers[self.get_best_peer()]
             self.shm[best.url].cnt_requests += 1
 
-            self.logger.info("get sct neuro peer")
+            self.logger.info(f"get sct neuro peer {self.nreq_since_last_weight_update}")
             self.logger.info(self.shm[best.url])
             return best
 
@@ -86,4 +122,4 @@ class Balancer:
         return await self.make_request(peer)
 
 
-balancer = Balancer(model=None, gap_in_requests=5)
+balancer = Balancer(policy=test_model, gap_in_requests=5)
