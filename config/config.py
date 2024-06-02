@@ -12,7 +12,7 @@ class AppSettings(BaseSettings):
     openapi_prefix: str = ""
     openapi_url: str = "/openapi.json"
     redoc_url: str = "/swagger"
-    title: str = 'Avito price service API'
+    title: str = 'Sct Mock Model API'
     version: str = '0.0.1'
 
     api_prefix: str = "/api/v1"

@@ -20,3 +20,6 @@ watchfiles==0.20.0
 websockets==11.0.3
 pydantic-settings==2.0.3
 aiohttp~=3.8.6
+numpy==1.26.4
+torch==2.3.0
+gym==0.26.2

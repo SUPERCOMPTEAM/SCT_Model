@@ -22,15 +22,16 @@ class ShmBlock:
 
 
 class Balancer:
-    def __init__(self, gap_in_requests):
+    def __init__(self, model, gap_in_requests, postfix="load/random"):
+        self.model = model
         self.session = None
         self.logger = logging.getLogger(__name__)
         self.peers = [
-            Peer("http://mock_server1:8001/hello", 0, 0, 0.0),
-            Peer("http://mock_server2:8002/hello", 0, 0, 0.0),
-            Peer("http://mock_server3:8003/hello", 0, 0, 0.0),
-            Peer("http://mock_server4:8004/hello", 0, 0, 0.0),
-            Peer("http://mock_server5:8005/hello", 0, 0, 0.0)
+            Peer(f"http://mock_server1:8001/{postfix}", 0, 0, 0.0),
+            Peer(f"http://mock_server2:8002/{postfix}", 0, 0, 0.0),
+            Peer(f"http://mock_server3:8003/{postfix}", 0, 0, 0.0),
+            Peer(f"http://mock_server4:8004/{postfix}", 0, 0, 0.0),
+            Peer(f"http://mock_server5:8005/{postfix}", 0, 0, 0.0)
         ]
         self.shm = {peer.url: ShmBlock(0, 0) for peer in self.peers}
         self.nreq_since_last_weight_update = 0
@@ -59,6 +60,9 @@ class Balancer:
                 self.nreq_since_last_weight_update += 1
 
             if self.nreq_since_last_weight_update == 0:
+
+
+
                 for peer in self.peers:
                     peer.neuro_weight = random.random()
 
@@ -82,4 +86,4 @@ class Balancer:
         return await self.make_request(peer)
 
 
-balancer = Balancer(gap_in_requests=5)
+balancer = Balancer(model=None, gap_in_requests=5)
