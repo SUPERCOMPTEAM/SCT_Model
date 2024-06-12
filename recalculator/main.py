@@ -1,4 +1,6 @@
-import argparse
+import asyncio
+import struct
+import logging
 import copy
 import numpy as np
 import torch
@@ -6,6 +8,31 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+def translate_neuro_weights(weights: list[int], server_count: int) -> list[float]:
+    general_size = len(weights) / server_count
+    servers = [0 for _ in range(server_count)]
+
+    server_idx = 0
+    size = general_size
+    for weight_idx in range(len(weights)):
+        integrity = 1.0
+        while integrity > 0:
+            if size >= integrity:
+                servers[server_idx] += integrity * weights[weight_idx]
+                size -= integrity
+                break
+            else:
+                servers[server_idx] += size * weights[weight_idx]
+                integrity -= size
+                size = general_size
+                server_idx += 1
+                if server_idx >= server_count:
+                    break
+
+    return servers
 
 
 class Actor(nn.Module):
@@ -151,36 +178,46 @@ class TD3(object):
         torch.save(self.actor_optimizer.state_dict(), filename + "_actor_optimizer")
 
     def load(self, filename):
-        self.critic.load_state_dict(torch.load(filename + "_critic"))
-        self.critic_optimizer.load_state_dict(torch.load(filename + "_critic_optimizer"))
+        self.critic.load_state_dict(torch.load(filename + "_critic", map_location=torch.device(device)))
+        self.critic_optimizer.load_state_dict(torch.load(filename + "_critic_optimizer", map_location=torch.device(device)))
         self.critic_target = copy.deepcopy(self.critic)
 
-        self.actor.load_state_dict(torch.load(filename + "_actor"))
-        self.actor_optimizer.load_state_dict(torch.load(filename + "_actor_optimizer"))
+        self.actor.load_state_dict(torch.load(filename + "_actor", map_location=torch.device(device)))
+        self.actor_optimizer.load_state_dict(torch.load(filename + "_actor_optimizer", map_location=torch.device(device)))
         self.actor_target = copy.deepcopy(self.actor)
 
 
-test_model = TD3(200, 100, 100)
-test_model.load("../weights/TD3_NGinxEnv_0_")
+async def handler(reader, writer):
+    data_length = struct.unpack('I', await reader.read(4))[0]
+    logger.info(f"Received data length: {data_length}")
+    data = await reader.read(data_length)
+    logger.info(f"Received data: {data}")
+    observation = np.frombuffer(data, dtype=np.int32)
+    logger.info(f"Converted observation: {observation}")
+    
+    cnt_servers = len(observation) // 2
+    action = test_model.select_action(np.array(translate_neuro_weights(observation, 200)))
+    processed_data = translate_neuro_weights(action, cnt_servers)
+    logger.info(f"Processed data: {processed_data}")
+    
+    response_data = np.array(processed_data, dtype=np.float32).tobytes()
+    writer.write(response_data)
+    await writer.drain()
+    writer.close()
+    await writer.wait_closed()
+    logger.info("Response sent and connection closed")
+
+
+async def main():
+    server = await asyncio.start_server(handler, 'recalculator', 7998)
+    async with server:
+        await server.serve_forever()
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--load_model", default="")
-    parser.add_argument("--load_observation", default="./kal.npy")
-    args = parser.parse_args()
-
-    observation = np.load(args.load_observation)
-
-    action = test_model.select_action(np.array(observation))
-
-    print(observation, action)
-
-    #array = np.zeros(10)
-    #np.save("./kal", array)
-
-
-
-
-
-
+    logger.info("Initializing model")
+    test_model = TD3(200, 100, 100)
+    logger.info("Loading model")
+    test_model.load("./weights/TD3_NGinxEnv_0")
+    logger.info("Server started")
+    asyncio.run(main())

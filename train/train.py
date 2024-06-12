@@ -160,4 +160,4 @@ class TD3(object):
 
 
 test_model = TD3(200, 100, 100)
-test_model.load("../weights/TD3_NGinxEnv_0_")
+test_model.load("/src/weights/TD3_NGinxEnv_0")

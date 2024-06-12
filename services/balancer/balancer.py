@@ -86,10 +86,6 @@ class Balancer:
                 peer.cnt_requests = block.cnt_requests
                 peer.cnt_responses = block.cnt_responses
 
-            if self.nreq_since_last_weight_update >= self.gap_in_requests:
-                self.nreq_since_last_weight_update = 0
-            else:
-                self.nreq_since_last_weight_update += 1
             if self.nreq_since_last_weight_update == 0:
                 self.logger.info("Regenerate peers weights...")
 
@@ -101,6 +97,11 @@ class Balancer:
                     peer.neuro_weight = neuro_weights[i]
 
                 self.logger.info(f"peers weights: {[peer.neuro_weight for peer in self.peers]}")
+
+            if self.nreq_since_last_weight_update >= self.gap_in_requests:
+                self.nreq_since_last_weight_update = 0
+            else:
+                self.nreq_since_last_weight_update += 1
 
             best = self.peers[self.get_best_peer()]
             self.shm[best.url].cnt_requests += 1
